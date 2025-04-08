@@ -166,7 +166,7 @@ export function ListsOverview() {
               </div>
               <div className="flex justify-end gap-2">
                 <DialogClose asChild>
-                  <Button variant="outline" className="border-gray-600 text-gray-300">
+                  <Button className="bg-gray-700 hover:bg-gray-600 text-white">
                     Cancel
                   </Button>
                 </DialogClose>
