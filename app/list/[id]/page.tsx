@@ -20,6 +20,9 @@ import {
   Film,
   Tv,
   Settings,
+  SortDesc,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -40,6 +43,17 @@ import { useUser } from "@/contexts/user-context"
 import { UserMenu } from "@/components/user-menu"
 import toast from "react-hot-toast"
 import { type MediaItem, type List, getList, updateList, addItemToList, deleteList } from "@/lib/db-service"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+
+// Define sort options
+type SortOption = {
+  label: string
+  value: string
+  sortFn: (a: MediaItem, b: MediaItem) => number
+}
+
+// Items per page for pagination
+const ITEMS_PER_PAGE = 10
 
 export default function ListDetailPage({ params }: { params: { id: string } }) {
   const [list, setList] = useState<List | null>(null)
@@ -57,8 +71,107 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
   const [showSettingsDialog, setShowSettingsDialog] = useState(false)
   const [selectedItemDetails, setSelectedItemDetails] = useState<{ id: string; type: "movie" | "series" } | null>(null)
   const [userDisplayNames, setUserDisplayNames] = useState<Record<string, string>>({})
+  const [sortOption, setSortOption] = useState<string>("unwatched-added")
+  const [moviesPage, setMoviesPage] = useState(1)
+  const [seriesPage, setSeriesPage] = useState(1)
   const router = useRouter()
   const { user } = useUser()
+
+  // Define sort options with more complex sorting
+  const sortOptions: SortOption[] = [
+    {
+      label: "Unwatched first, newest added",
+      value: "unwatched-added",
+      sortFn: (a, b) => {
+        // First sort by watched status
+        if (a.watched !== b.watched) {
+          return a.watched ? 1 : -1
+        }
+        // Then sort by added date (assuming addedAt exists)
+        const dateA = a.addedAt ? new Date(a.addedAt).getTime() : 0
+        const dateB = b.addedAt ? new Date(b.addedAt).getTime() : 0
+        return dateB - dateA // Newest first
+      },
+    },
+    {
+      label: "Unwatched first, alphabetical",
+      value: "unwatched-alpha",
+      sortFn: (a, b) => {
+        // First sort by watched status
+        if (a.watched !== b.watched) {
+          return a.watched ? 1 : -1
+        }
+        // Then sort alphabetically
+        return a.title.localeCompare(b.title)
+      },
+    },
+    {
+      label: "Unwatched first, newest release",
+      value: "unwatched-year",
+      sortFn: (a, b) => {
+        // First sort by watched status
+        if (a.watched !== b.watched) {
+          return a.watched ? 1 : -1
+        }
+        // Then sort by release year
+        const yearA = Number.parseInt(a.year || "0")
+        const yearB = Number.parseInt(b.year || "0")
+        return yearB - yearA // Newest first
+      },
+    },
+    {
+      label: "Unwatched first, highest rated",
+      value: "unwatched-rating",
+      sortFn: (a, b) => {
+        // First sort by watched status
+        if (a.watched !== b.watched) {
+          return a.watched ? 1 : -1
+        }
+        // Then sort by rating
+        return (b.voteAverage || 0) - (a.voteAverage || 0)
+      },
+    },
+    {
+      label: "Alphabetical (A-Z)",
+      value: "alpha-asc",
+      sortFn: (a, b) => a.title.localeCompare(b.title),
+    },
+    {
+      label: "Alphabetical (Z-A)",
+      value: "alpha-desc",
+      sortFn: (a, b) => b.title.localeCompare(a.title),
+    },
+    {
+      label: "Release Year (Newest)",
+      value: "year-desc",
+      sortFn: (a, b) => Number.parseInt(b.year || "0") - Number.parseInt(a.year || "0"),
+    },
+    {
+      label: "Release Year (Oldest)",
+      value: "year-asc",
+      sortFn: (a, b) => Number.parseInt(a.year || "0") - Number.parseInt(b.year || "0"),
+    },
+    {
+      label: "Rating (Highest)",
+      value: "rating-desc",
+      sortFn: (a, b) => (b.voteAverage || 0) - (a.voteAverage || 0),
+    },
+    {
+      label: "Recently Added",
+      value: "added-desc",
+      sortFn: (a, b) => {
+        const dateA = a.addedAt ? new Date(a.addedAt).getTime() : 0
+        const dateB = b.addedAt ? new Date(b.addedAt).getTime() : 0
+        return dateB - dateA // Newest first
+      },
+    },
+  ]
+
+  // Reset pagination when tab or sort changes
+  useEffect(() => {
+    setMoviesPage(1)
+    setSeriesPage(1)
+  }, [activeTab, sortOption])
 
   // Load list from Supabase
   useEffect(() => {
@@ -191,7 +304,21 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
         return !list?.items.some((existingItem) => existingItem.id === item.id)
       })
 
-      return filteredResults || []
+      // Sort by year (newest first) and then by relevance
+      const sortedResults = filteredResults.sort((a: MediaItem, b: MediaItem) => {
+        // First sort by year (newest first)
+        const yearA = Number.parseInt(a.year || "0")
+        const yearB = Number.parseInt(b.year || "0")
+
+        if (yearB !== yearA) {
+          return yearB - yearA
+        }
+
+        // If years are the same, sort by vote average (relevance)
+        return (b.voteAverage || 0) - (a.voteAverage || 0)
+      })
+
+      return sortedResults || []
     } catch (error) {
       console.error("Error searching:", error)
       toast.error("Search failed. Please try again.")
@@ -220,15 +347,21 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
     }
 
     try {
+      // Add current timestamp as addedAt
+      const itemWithTimestamp = {
+        ...item,
+        addedAt: new Date().toISOString(),
+      }
+
       // Use the addItemToList function that includes addedBy
-      const updatedList = await addItemToList(list.id, item, user.id)
+      const updatedList = await addItemToList(list.id, itemWithTimestamp, user.id)
       setList(updatedList)
       toast.success(`"${item.title}" has been added to "${list.name}".`)
 
-      // Reset search after adding
-      setSearchResults([])
-      setSearchQuery("")
-      setIsSearching(false)
+      // Remove the added item from search results but keep the search open
+      setSearchResults(searchResults.filter((result) => result.id !== item.id))
+
+      // Don't reset search query or close search
     } catch (error) {
       console.error("Error adding item to list:", error)
       toast.error("Failed to add item to list")
@@ -492,13 +625,12 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
       case "unwatched":
         items = items.filter((item) => !item.watched)
         break
-      case "all":
-        // Sort unwatched items first, then watched items
-        items.sort((a, b) => {
-          if (a.watched === b.watched) return 0
-          return a.watched ? 1 : -1
-        })
-        break
+    }
+
+    // Apply sorting
+    const currentSortOption = sortOptions.find((option) => option.value === sortOption)
+    if (currentSortOption) {
+      items.sort(currentSortOption.sortFn)
     }
 
     return items
@@ -512,6 +644,24 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
   const getSeries = () => {
     return filteredItems().filter((item) => item.type === "series")
   }
+
+  // Pagination for movies
+  const paginatedMovies = () => {
+    const movies = getMovies()
+    const startIndex = (moviesPage - 1) * ITEMS_PER_PAGE
+    return movies.slice(startIndex, startIndex + ITEMS_PER_PAGE)
+  }
+
+  // Pagination for series
+  const paginatedSeries = () => {
+    const series = getSeries()
+    const startIndex = (seriesPage - 1) * ITEMS_PER_PAGE
+    return series.slice(startIndex, startIndex + ITEMS_PER_PAGE)
+  }
+
+  // Calculate total pages
+  const totalMoviesPages = Math.ceil(getMovies().length / ITEMS_PER_PAGE)
+  const totalSeriesPages = Math.ceil(getSeries().length / ITEMS_PER_PAGE)
 
   // Get display name for a user
   const getDisplayName = (userId: string) => {
@@ -774,19 +924,43 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
         >
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-bold text-purple-400">Your Collection</h2>
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-auto">
-              <TabsList className="bg-gray-800">
-                <TabsTrigger value="all" className="data-[state=active]:bg-purple-600 text-white">
-                  All
-                </TabsTrigger>
-                <TabsTrigger value="watched" className="data-[state=active]:bg-purple-600 text-white">
-                  Watched
-                </TabsTrigger>
-                <TabsTrigger value="unwatched" className="data-[state=active]:bg-purple-600 text-white">
-                  Unwatched
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
+            <div className="flex items-center gap-2">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-auto">
+                <TabsList className="bg-gray-800">
+                  <TabsTrigger value="all" className="data-[state=active]:bg-purple-600 text-white">
+                    All
+                  </TabsTrigger>
+                  <TabsTrigger value="watched" className="data-[state=active]:bg-purple-600 text-white">
+                    Watched
+                  </TabsTrigger>
+                  <TabsTrigger value="unwatched" className="data-[state=active]:bg-purple-600 text-white">
+                    Unwatched
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="bg-gray-700 border-gray-600 text-white">
+                    <SortDesc className="h-4 w-4 mr-2" />
+                    Sort
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="bg-gray-800 border-gray-700 text-white max-h-[300px] overflow-y-auto">
+                  {sortOptions.map((option) => (
+                    <DropdownMenuItem
+                      key={option.value}
+                      className={`${
+                        sortOption === option.value ? "bg-purple-600 text-white" : "text-gray-300 hover:bg-gray-700"
+                      } cursor-pointer`}
+                      onClick={() => setSortOption(option.value)}
+                    >
+                      {option.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
 
           {filteredItems().length > 0 ? (
@@ -802,7 +976,7 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                     <AnimatePresence>
-                      {getMovies().map((item) => (
+                      {paginatedMovies().map((item) => (
                         <motion.div
                           key={item.id}
                           className={`bg-gray-800 rounded-lg overflow-hidden hover:bg-gray-750 transition-colors pixel-border ${
@@ -898,6 +1072,33 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
                       ))}
                     </AnimatePresence>
                   </div>
+
+                  {/* Pagination for Movies */}
+                  {totalMoviesPages > 1 && (
+                    <div className="flex justify-center items-center mt-6 space-x-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setMoviesPage(Math.max(1, moviesPage - 1))}
+                        disabled={moviesPage === 1}
+                        className="bg-gray-700 border-gray-600 text-white h-8 w-8 p-0"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="text-sm text-gray-400">
+                        Page {moviesPage} of {totalMoviesPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setMoviesPage(Math.min(totalMoviesPages, moviesPage + 1))}
+                        disabled={moviesPage === totalMoviesPages}
+                        className="bg-gray-700 border-gray-600 text-white h-8 w-8 p-0"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -912,7 +1113,7 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                     <AnimatePresence>
-                      {getSeries().map((item) => (
+                      {paginatedSeries().map((item) => (
                         <motion.div
                           key={item.id}
                           className={`bg-gray-800 rounded-lg overflow-hidden hover:bg-gray-750 transition-colors pixel-border ${
@@ -1034,6 +1235,33 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
                       ))}
                     </AnimatePresence>
                   </div>
+
+                  {/* Pagination for Series */}
+                  {totalSeriesPages > 1 && (
+                    <div className="flex justify-center items-center mt-6 space-x-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSeriesPage(Math.max(1, seriesPage - 1))}
+                        disabled={seriesPage === 1}
+                        className="bg-gray-700 border-gray-600 text-white h-8 w-8 p-0"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="text-sm text-gray-400">
+                        Page {seriesPage} of {totalSeriesPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSeriesPage(Math.min(totalSeriesPages, seriesPage + 1))}
+                        disabled={seriesPage === totalSeriesPages}
+                        className="bg-gray-700 border-gray-600 text-white h-8 w-8 p-0"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
 

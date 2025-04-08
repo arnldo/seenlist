@@ -104,14 +104,47 @@ export async function addCollaborator(listId: string, email: string) {
 
     if (fetchError) throw fetchError
 
-    // Get user by email
-    const { data: userData, error: userError } = await supabase.from("users").select("id").eq("email", email).single()
+    // Get user by email from auth.users instead of public.users
+    const { data: userData, error: userError } = await supabase
+      .from("auth.users")
+      .select("id")
+      .eq("email", email)
+      .single()
 
     if (userError) {
-      if (userError.code === "PGRST116") {
+      // If the user doesn't exist in auth.users, try to get from profiles table
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("email", email)
+        .single()
+
+      if (profileError) {
         throw new Error("User not found")
       }
-      throw userError
+
+      // Use the profile ID if found
+      const collaboratorId = profileData.id
+
+      // Check if already a collaborator
+      const collaborators = list.collaborators || []
+      if (collaborators.includes(collaboratorId)) {
+        throw new Error("User is already a collaborator")
+      }
+
+      // Add collaborator
+      const updatedCollaborators = [...collaborators, collaboratorId]
+
+      // Update the list
+      const { data, error } = await supabase
+        .from("lists")
+        .update({ collaborators: updatedCollaborators })
+        .eq("id", listId)
+        .select()
+
+      if (error) throw error
+
+      return data?.[0]
     }
 
     const collaboratorId = userData.id
