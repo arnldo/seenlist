@@ -1,6 +1,17 @@
 import { supabase } from "./supabase"
 import { v4 as uuidv4 } from "uuid"
 
+// Update the List type to include collaborators
+export type List = {
+  id: string
+  name: string
+  user_id: string
+  items: MediaItem[]
+  collaborators?: string[]
+  created_at?: string
+}
+
+// Update the MediaItem type to include addedBy
 export type MediaItem = {
   id: string
   tmdbId: number
@@ -15,14 +26,7 @@ export type MediaItem = {
   watchedAt?: string
   seasons?: any[]
   watchProgress?: number
-}
-
-export type List = {
-  id: string
-  name: string
-  user_id: string
-  items: MediaItem[]
-  created_at?: string
+  addedBy?: string
 }
 
 // Lists
@@ -92,8 +96,82 @@ export async function deleteList(id: string) {
   return true
 }
 
+// Add function to invite collaborator
+export async function addCollaborator(listId: string, email: string) {
+  try {
+    // First get the current list
+    const { data: list, error: fetchError } = await supabase.from("lists").select("*").eq("id", listId).single()
+
+    if (fetchError) throw fetchError
+
+    // Get user by email
+    const { data: userData, error: userError } = await supabase.from("users").select("id").eq("email", email).single()
+
+    if (userError) {
+      if (userError.code === "PGRST116") {
+        throw new Error("User not found")
+      }
+      throw userError
+    }
+
+    const collaboratorId = userData.id
+
+    // Check if already a collaborator
+    const collaborators = list.collaborators || []
+    if (collaborators.includes(collaboratorId)) {
+      throw new Error("User is already a collaborator")
+    }
+
+    // Add collaborator
+    const updatedCollaborators = [...collaborators, collaboratorId]
+
+    // Update the list
+    const { data, error } = await supabase
+      .from("lists")
+      .update({ collaborators: updatedCollaborators })
+      .eq("id", listId)
+      .select()
+
+    if (error) throw error
+
+    return data?.[0]
+  } catch (error) {
+    console.error("Error adding collaborator:", error)
+    throw error
+  }
+}
+
+// Add function to remove collaborator
+export async function removeCollaborator(listId: string, collaboratorId: string) {
+  try {
+    // First get the current list
+    const { data: list, error: fetchError } = await supabase.from("lists").select("*").eq("id", listId).single()
+
+    if (fetchError) throw fetchError
+
+    // Remove collaborator
+    const collaborators = list.collaborators || []
+    const updatedCollaborators = collaborators.filter((id) => id !== collaboratorId)
+
+    // Update the list
+    const { data, error } = await supabase
+      .from("lists")
+      .update({ collaborators: updatedCollaborators })
+      .eq("id", listId)
+      .select()
+
+    if (error) throw error
+
+    return data?.[0]
+  } catch (error) {
+    console.error("Error removing collaborator:", error)
+    throw error
+  }
+}
+
 // Items
-export async function addItemToList(listId: string, item: MediaItem) {
+// Update addItemToList to include addedBy
+export async function addItemToList(listId: string, item: MediaItem, userId: string) {
   // First get the current list
   const { data: list, error: fetchError } = await supabase.from("lists").select("*").eq("id", listId).single()
 
@@ -102,8 +180,14 @@ export async function addItemToList(listId: string, item: MediaItem) {
     throw fetchError
   }
 
-  // Add the item to the list
-  const updatedItems = [...(list.items || []), item]
+  // Add the item to the list with addedBy
+  const itemWithAddedBy = {
+    ...item,
+    addedBy: userId,
+    watched: false,
+  }
+
+  const updatedItems = [...(list.items || []), itemWithAddedBy]
 
   // Update the list
   const { data, error } = await supabase.from("lists").update({ items: updatedItems }).eq("id", listId).select()

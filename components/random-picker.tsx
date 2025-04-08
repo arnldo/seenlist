@@ -1,11 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import Image from "next/image"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Eye, Film, Tv, Shuffle } from "lucide-react"
+import { Eye, Film, Tv, Shuffle, Info } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import confetti from "canvas-confetti"
 import toast from "react-hot-toast"
@@ -38,6 +38,57 @@ export function RandomPicker({ open, onOpenChange, items, onMarkWatched, onViewD
   const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null)
   const [isSpinning, setIsSpinning] = useState(false)
   const [searchType, setSearchType] = useState<"all" | "movie" | "series">("all")
+  const [soundsLoaded, setSoundsLoaded] = useState(false)
+
+  // Audio refs for sound effects
+  const spinSoundRef = useRef<HTMLAudioElement | null>(null)
+  const winSoundRef = useRef<HTMLAudioElement | null>(null)
+
+  // Initialize audio elements
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      // Create audio elements
+      spinSoundRef.current = new Audio("/sounds/spin.mp3")
+      winSoundRef.current = new Audio("/sounds/win.mp3")
+
+      // Check if sounds are loaded
+      const checkSounds = () => {
+        const spinLoaded = spinSoundRef.current?.readyState === 4
+        const winLoaded = winSoundRef.current?.readyState === 4
+
+        if (spinLoaded && winLoaded) {
+          setSoundsLoaded(true)
+        } else {
+          // If sounds aren't loaded yet, we'll use a fallback approach
+          // and not block the functionality
+          console.log("Sound files not fully loaded, using fallback")
+        }
+      }
+
+      // Set event listeners to check when sounds are loaded
+      if (spinSoundRef.current) {
+        spinSoundRef.current.addEventListener("canplaythrough", checkSounds)
+      }
+      if (winSoundRef.current) {
+        winSoundRef.current.addEventListener("canplaythrough", checkSounds)
+      }
+
+      // Initial check
+      checkSounds()
+    }
+
+    return () => {
+      // Cleanup
+      if (spinSoundRef.current) {
+        spinSoundRef.current.pause()
+        spinSoundRef.current = null
+      }
+      if (winSoundRef.current) {
+        winSoundRef.current.pause()
+        winSoundRef.current = null
+      }
+    }
+  }, [])
 
   // Filter unwatched items
   const getUnwatchedItems = () => {
@@ -62,6 +113,12 @@ export function RandomPicker({ open, onOpenChange, items, onMarkWatched, onViewD
     setIsSpinning(true)
     setSelectedItem(null)
 
+    // Play spin sound if loaded
+    if (spinSoundRef.current && soundsLoaded) {
+      spinSoundRef.current.currentTime = 0
+      spinSoundRef.current.play().catch((e) => console.error("Error playing sound:", e))
+    }
+
     // Create a visual spinning effect with multiple items
     const spinDuration = 2000 // 2 seconds
     const spinInterval = 100 // Switch items every 100ms
@@ -81,6 +138,15 @@ export function RandomPicker({ open, onOpenChange, items, onMarkWatched, onViewD
         const finalItem = unwatchedItems[randomIndex]
         setSelectedItem(finalItem)
         setIsSpinning(false)
+
+        // Stop spin sound and play win sound if loaded
+        if (spinSoundRef.current) {
+          spinSoundRef.current.pause()
+        }
+        if (winSoundRef.current && soundsLoaded) {
+          winSoundRef.current.currentTime = 0
+          winSoundRef.current.play().catch((e) => console.error("Error playing sound:", e))
+        }
 
         // Trigger confetti effect
         confetti({
@@ -102,33 +168,53 @@ export function RandomPicker({ open, onOpenChange, items, onMarkWatched, onViewD
         </DialogHeader>
 
         <div className="py-4">
-          <div className="flex justify-between items-center mb-4">
+          {/* Redesigned filter component */}
+          <div className="bg-gray-750 rounded-lg p-3 mb-4">
+            <div className="text-sm text-gray-400 mb-2">Filter by type:</div>
             <div className="flex gap-2">
               <Button
-                variant="outline"
-                className={`border-gray-600 ${searchType === "all" ? "bg-purple-600 text-white" : "text-gray-300"}`}
+                size="sm"
+                className={`rounded-full ${
+                  searchType === "all"
+                    ? "bg-purple-600 hover:bg-purple-700 text-white"
+                    : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                }`}
                 onClick={() => setSearchType("all")}
               >
                 All Types
               </Button>
               <Button
-                variant="outline"
-                className={`border-gray-600 ${searchType === "movie" ? "bg-purple-600 text-white" : "text-gray-300"}`}
+                size="sm"
+                className={`rounded-full ${
+                  searchType === "movie"
+                    ? "bg-purple-600 hover:bg-purple-700 text-white"
+                    : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                }`}
                 onClick={() => setSearchType("movie")}
               >
-                <Film className="mr-2 h-4 w-4" />
+                <Film className="mr-1 h-3.5 w-3.5" />
                 Movies
               </Button>
               <Button
-                variant="outline"
-                className={`border-gray-600 ${searchType === "series" ? "bg-purple-600 text-white" : "text-gray-300"}`}
+                size="sm"
+                className={`rounded-full ${
+                  searchType === "series"
+                    ? "bg-purple-600 hover:bg-purple-700 text-white"
+                    : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                }`}
                 onClick={() => setSearchType("series")}
               >
-                <Tv className="mr-2 h-4 w-4" />
+                <Tv className="mr-1 h-3.5 w-3.5" />
                 Series
               </Button>
             </div>
+            <div className="mt-3 text-xs text-gray-500">
+              {getUnwatchedItems().length} unwatched{" "}
+              {searchType === "movie" ? "movies" : searchType === "series" ? "series" : "items"} available
+            </div>
+          </div>
 
+          <div className="flex justify-end mb-4">
             <Button
               onClick={startPicking}
               disabled={isSpinning || getUnwatchedItems().length === 0}
@@ -202,19 +288,18 @@ export function RandomPicker({ open, onOpenChange, items, onMarkWatched, onViewD
                           </Button>
                           <Button
                             size="sm"
-                            variant="outline"
                             onClick={() => onMarkWatched(selectedItem.id)}
-                            className="border-purple-500 text-purple-400 hover:bg-purple-900/20"
+                            className="bg-purple-600 hover:bg-purple-700 text-white"
                           >
                             <Eye className="mr-2 h-3 w-3" />
                             Mark as Watched
                           </Button>
                           <Button
                             size="sm"
-                            variant="outline"
                             onClick={() => onViewDetails(selectedItem.id, selectedItem.type)}
-                            className="border-blue-500 text-blue-400 hover:bg-blue-900/20"
+                            className="bg-purple-600 hover:bg-purple-700 text-white"
                           >
+                            <Info className="mr-2 h-3 w-3" />
                             Details
                           </Button>
                         </div>

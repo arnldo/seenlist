@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { motion } from "framer-motion"
 import { format } from "date-fns"
+import { supabase } from "@/lib/supabase"
 
 type Episode = {
   id: number
@@ -40,37 +41,88 @@ type MediaItem = {
   watchedAt?: string
   seasons?: Season[]
   watchProgress?: number
+  addedBy?: string
 }
 
 type List = {
   id: string
   name: string
   items: MediaItem[]
+  user_id: string
 }
 
 export default function SharedListPage({ params }: { params: { id: string } }) {
   const [list, setList] = useState<List | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [userDisplayNames, setUserDisplayNames] = useState<Record<string, string>>({})
   const router = useRouter()
 
-  // Load list from localStorage
+  // Load list from Supabase
   useEffect(() => {
-    const savedLists = localStorage.getItem("pixelflix-lists")
-    if (savedLists) {
-      const lists = JSON.parse(savedLists)
-      const currentList = lists.find((l: List) => l.id === params.id)
-      if (currentList) {
-        setList(currentList)
-      } else {
-        // In a real app, we would fetch the shared list from an API
-        // For demo purposes, we'll just redirect to home if not found
-        router.push("/")
+    const fetchList = async () => {
+      try {
+        const { data, error } = await supabase.from("lists").select("*").eq("id", params.id).single()
+
+        if (error) {
+          throw error
+        }
+
+        if (data) {
+          setList(data)
+          fetchUserDisplayNames(data)
+        } else {
+          setError("List not found")
+        }
+      } catch (err) {
+        console.error("Error fetching shared list:", err)
+        setError("Failed to load list")
+      } finally {
+        setLoading(false)
       }
-    } else {
-      router.push("/")
     }
-    setLoading(false)
-  }, [params.id, router])
+
+    fetchList()
+  }, [params.id])
+
+  // Fetch user display names for items
+  const fetchUserDisplayNames = async (listData: List) => {
+    // Collect all user IDs that need display names
+    const userIds = new Set<string>()
+
+    // Add list owner
+    userIds.add(listData.user_id)
+
+    // Add users who added items
+    listData.items.forEach((item) => {
+      if (item.addedBy) userIds.add(item.addedBy)
+    })
+
+    if (userIds.size === 0) return
+
+    try {
+      const { data, error } = await supabase
+        .from("users")
+        .select("id, email, display_name")
+        .in("id", Array.from(userIds))
+
+      if (error) throw error
+
+      const displayNames: Record<string, string> = {}
+      data?.forEach((user) => {
+        displayNames[user.id] = user.display_name || user.email || "Unknown user"
+      })
+
+      setUserDisplayNames(displayNames)
+    } catch (error) {
+      console.error("Error fetching user display names:", error)
+    }
+  }
+
+  // Get display name for a user
+  const getDisplayName = (userId: string) => {
+    return userDisplayNames[userId] || "Unknown user"
+  }
 
   if (loading) {
     return (
@@ -80,7 +132,7 @@ export default function SharedListPage({ params }: { params: { id: string } }) {
     )
   }
 
-  if (!list) {
+  if (error || !list) {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
         <div className="text-center">
@@ -93,6 +145,12 @@ export default function SharedListPage({ params }: { params: { id: string } }) {
       </div>
     )
   }
+
+  // Sort items to show unwatched first
+  const sortedItems = [...list.items].sort((a, b) => {
+    if (a.watched === b.watched) return 0
+    return a.watched ? 1 : -1
+  })
 
   return (
     <main className="min-h-screen bg-gray-900 text-white px-4 py-8">
@@ -121,6 +179,9 @@ export default function SharedListPage({ params }: { params: { id: string } }) {
             {list.items.length} {list.items.length === 1 ? "item" : "items"} •{" "}
             {list.items.filter((item) => item.watched).length} watched
           </p>
+          {list.user_id && userDisplayNames[list.user_id] && (
+            <p className="text-gray-400">Created by: {userDisplayNames[list.user_id]}</p>
+          )}
         </motion.header>
 
         {/* List Items */}
@@ -130,19 +191,19 @@ export default function SharedListPage({ params }: { params: { id: string } }) {
           transition={{ duration: 0.3, delay: 0.2 }}
         >
           {list.items.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-              {list.items.map((item, index) => (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+              {sortedItems.map((item, index) => (
                 <motion.div
                   key={item.id}
                   className={`bg-gray-800 rounded-lg overflow-hidden hover:bg-gray-750 transition-colors pixel-border ${
-                    item.watched ? "border-l-4 border-l-purple-500" : ""
+                    item.watched ? "border-l-4 border-l-purple-500 opacity-70" : ""
                   }`}
                   initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
+                  animate={{ opacity: item.watched ? 0.7 : 1, scale: 1 }}
                   transition={{ duration: 0.2, delay: index * 0.05 }}
-                  whileHover={{ y: -5 }}
+                  whileHover={{ y: -5, opacity: 1 }}
                 >
-                  <div className="relative h-[150px]">
+                  <div className="relative h-[120px]">
                     <Image
                       src={item.image || "/placeholder.svg?height=150&width=100"}
                       alt={item.title}
@@ -185,8 +246,15 @@ export default function SharedListPage({ params }: { params: { id: string } }) {
                       </div>
                     )}
 
+                    {/* Added by information */}
+                    {item.addedBy && (
+                      <div className="text-xs text-gray-400 mb-2">Added by: {getDisplayName(item.addedBy)}</div>
+                    )}
+
                     <div>
-                      <p className="text-sm text-gray-300">{item.year}</p>
+                      <Badge variant="outline" className="text-xs text-white bg-gray-700">
+                        {item.year}
+                      </Badge>
                       <div className="flex flex-wrap gap-1 mt-1">
                         {item.genres.slice(0, 2).map((genre) => (
                           <Badge key={genre} variant="outline" className="text-xs">

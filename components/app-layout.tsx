@@ -2,21 +2,22 @@
 
 import type { ReactNode } from "react"
 import { UserMenu } from "@/components/user-menu"
-import Link from "next/link"
 
 type AppLayoutProps = {
   children: ReactNode
+  showBackButton?: boolean
 }
 
-export function AppLayout({ children }: AppLayoutProps) {
+export function AppLayout({ children, showBackButton = false }: AppLayoutProps) {
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      <header className="border-b border-gray-800 bg-gray-900">
-        <div className="container mx-auto px-4 py-3 flex justify-between items-center">
+      {/* Only render the top container if we're not showing a back button */}
+      {!showBackButton && (
+        <div className="container mx-auto px-4 py-3 flex justify-end items-center">
           <UserMenu />
         </div>
-      </header>
-      <main className="container mx-auto px-4 py-8">{children}</main>
+      )}
+      <main className="container mx-auto px-4 py-4">{children}</main>
     </div>
   )
 }

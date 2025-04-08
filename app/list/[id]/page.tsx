@@ -19,38 +19,44 @@ import {
   Calendar,
   Film,
   Tv,
+  Settings,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Progress } from "@/components/ui/progress"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog"
 import { motion, AnimatePresence } from "framer-motion"
 import { format } from "date-fns"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { RandomPicker } from "@/components/random-picker"
 import { MovieDetailsModal } from "@/components/movie-details-modal"
 import { SeriesDetailsDialog } from "@/components/series-details-dialog"
+import { ShareDialog } from "@/components/share-dialog"
+import { ListSettingsDialog } from "@/components/list-settings-dialog"
 import { AppLayout } from "@/components/app-layout"
 import { ProtectedRoute } from "@/components/protected-route"
 import { useUser } from "@/contexts/user-context"
+import { UserMenu } from "@/components/user-menu"
 import toast from "react-hot-toast"
-import { type MediaItem, type List, getList, updateList } from "@/lib/db-service"
+import { type MediaItem, type List, getList, updateList, addItemToList, deleteList } from "@/lib/db-service"
 
 export default function ListDetailPage({ params }: { params: { id: string } }) {
   const [list, setList] = useState<List | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [isSearching, setIsSearching] = useState(false)
   const [searchResults, setSearchResults] = useState<MediaItem[]>([])
+  const [isSearchLoading, setIsSearchLoading] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState("all")
   const [itemToDelete, setItemToDelete] = useState<string | null>(null)
   const [showRandomPicker, setShowRandomPicker] = useState(false)
   const [showSeriesDetails, setShowSeriesDetails] = useState<string | null>(null)
   const [loadingSeriesDetails, setLoadingSeriesDetails] = useState(false)
-  const [shareUrl, setShareUrl] = useState<string | null>(null)
+  const [showShareDialog, setShowShareDialog] = useState(false)
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false)
   const [selectedItemDetails, setSelectedItemDetails] = useState<{ id: string; type: "movie" | "series" } | null>(null)
+  const [userDisplayNames, setUserDisplayNames] = useState<Record<string, string>>({})
   const router = useRouter()
   const { user } = useUser()
 
@@ -60,6 +66,59 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
       fetchList()
     }
   }, [params.id, user])
+
+  // Fetch user display names for collaborators and items
+  useEffect(() => {
+    if (list) {
+      fetchUserDisplayNames()
+    }
+  }, [list])
+
+  const fetchUserDisplayNames = async () => {
+    // Since we don't have direct access to user profiles in this demo,
+    // we'll use a simplified approach to display user information
+    if (!list) return
+
+    const displayNames: Record<string, string> = {}
+
+    // Set the owner's display name
+    if (list.user_id) {
+      // If the current user is the owner, use their display name
+      if (user && user.id === list.user_id) {
+        displayNames[list.user_id] = user.user_metadata?.display_name || user.email || "You"
+      } else {
+        displayNames[list.user_id] = "List Owner"
+      }
+    }
+
+    // Set collaborator display names
+    if (list.collaborators) {
+      list.collaborators.forEach((id, index) => {
+        // If the current user is a collaborator, use their display name
+        if (user && user.id === id) {
+          displayNames[id] = user.user_metadata?.display_name || user.email || "You"
+        } else {
+          displayNames[id] = `Collaborator ${index + 1}`
+        }
+      })
+    }
+
+    // Set display names for users who added items
+    list.items.forEach((item) => {
+      if (item.addedBy && !displayNames[item.addedBy]) {
+        // If the current user added the item, use their display name
+        if (user && user.id === item.addedBy) {
+          displayNames[item.addedBy] = user.user_metadata?.display_name || user.email || "You"
+        } else if (item.addedBy === list.user_id) {
+          displayNames[item.addedBy] = "List Owner"
+        } else {
+          displayNames[item.addedBy] = "Collaborator"
+        }
+      }
+    })
+
+    setUserDisplayNames(displayNames)
+  }
 
   const fetchList = async () => {
     try {
@@ -72,8 +131,11 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
         return
       }
 
-      // Check if the list belongs to the current user
-      if (data.user_id !== user?.id) {
+      // Check if the list belongs to the current user or if user is a collaborator
+      const isOwner = data.user_id === user?.id
+      const isCollaborator = data.collaborators?.includes(user?.id || "")
+
+      if (!isOwner && !isCollaborator) {
         toast.error("You don't have access to this list")
         router.push("/")
         return
@@ -100,9 +162,23 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
     }
   }
 
+  // Delete list
+  const handleDeleteList = async () => {
+    try {
+      await deleteList(list?.id || "")
+      toast.success("List deleted successfully")
+      router.push("/")
+    } catch (error) {
+      console.error("Error deleting list:", error)
+      toast.error("Failed to delete list")
+    }
+  }
+
   // Search TMDB API
   const searchMedia = async (query: string) => {
-    setIsLoading(true)
+    if (!query.trim()) return []
+
+    setIsSearchLoading(true)
     try {
       const response = await fetch(`/api/tmdb/search?query=${encodeURIComponent(query)}`)
       if (!response.ok) {
@@ -121,20 +197,21 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
       toast.error("Search failed. Please try again.")
       return []
     } finally {
-      setIsLoading(false)
+      setIsSearchLoading(false)
     }
   }
 
   const handleSearch = async () => {
     if (searchQuery.trim() === "") return
 
+    setSearchResults([])
     setIsSearching(true)
     const results = await searchMedia(searchQuery)
     setSearchResults(results)
   }
 
-  const addToList = (item: MediaItem) => {
-    if (!list) return
+  const addToList = async (item: MediaItem) => {
+    if (!list || !user) return
 
     // Check if item already exists in the list
     if (list.items.some((existing) => existing.id === item.id)) {
@@ -142,24 +219,20 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
       return
     }
 
-    // Add watched property (default to false)
-    const itemWithWatched = {
-      ...item,
-      watched: false,
+    try {
+      // Use the addItemToList function that includes addedBy
+      const updatedList = await addItemToList(list.id, item, user.id)
+      setList(updatedList)
+      toast.success(`"${item.title}" has been added to "${list.name}".`)
+
+      // Reset search after adding
+      setSearchResults([])
+      setSearchQuery("")
+      setIsSearching(false)
+    } catch (error) {
+      console.error("Error adding item to list:", error)
+      toast.error("Failed to add item to list")
     }
-
-    const updatedList = {
-      ...list,
-      items: [...list.items, itemWithWatched],
-    }
-
-    saveList(updatedList)
-    toast.success(`"${item.title}" has been added to "${list.name}".`)
-
-    // Reset search after adding
-    setSearchResults([])
-    setSearchQuery("")
-    setIsSearching(false)
   }
 
   const confirmDeleteItem = (itemId: string) => {
@@ -400,21 +473,6 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
     toast.success(`All episodes in the season have been ${watched ? "marked as watched" : "marked as unwatched"}.`)
   }
 
-  // Share list function
-  const shareList = () => {
-    if (!list) return
-
-    // In a real app, this would create a server-side record
-    // For this demo, we'll just create a URL with the list ID
-    const url = `${window.location.origin}/shared-list/${list.id}`
-    setShareUrl(url)
-
-    // Copy to clipboard
-    navigator.clipboard.writeText(url).then(() => {
-      toast.success("Share link has been copied to clipboard")
-    })
-  }
-
   // View item details
   const viewItemDetails = (id: string, type: "movie" | "series") => {
     setSelectedItemDetails({ id, type })
@@ -425,13 +483,21 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
     if (!list) return []
 
     // Apply watched/unwatched filter
-    let items = list.items
+    let items = [...list.items] // Create a copy to avoid mutating the original
+
     switch (activeTab) {
       case "watched":
         items = items.filter((item) => item.watched)
         break
       case "unwatched":
         items = items.filter((item) => !item.watched)
+        break
+      case "all":
+        // Sort unwatched items first, then watched items
+        items.sort((a, b) => {
+          if (a.watched === b.watched) return 0
+          return a.watched ? 1 : -1
+        })
         break
     }
 
@@ -447,6 +513,11 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
     return filteredItems().filter((item) => item.type === "series")
   }
 
+  // Get display name for a user
+  const getDisplayName = (userId: string) => {
+    return userDisplayNames[userId] || "User"
+  }
+
   if (isLoading || !list) {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
@@ -457,18 +528,15 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
 
   return (
     <ProtectedRoute>
-      <AppLayout>
-        <motion.div
-          className="mb-6"
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-        >
+      <AppLayout showBackButton={true}>
+        {/* Header with back button and user menu */}
+        <div className="flex justify-between items-center mb-6">
           <Link href="/" className="flex items-center text-gray-400 hover:text-purple-400 transition-colors">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Lists
           </Link>
-        </motion.div>
+          <UserMenu />
+        </div>
 
         <motion.header
           className="mb-8"
@@ -478,30 +546,38 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
         >
           <div className="flex justify-between items-center mb-2">
             <h1 className="text-3xl font-bold text-purple-400 pixel-font">{list.name}</h1>
-            <Button
-              onClick={shareList}
-              variant="outline"
-              className="border-purple-500 text-purple-400 hover:bg-purple-900/20"
-            >
-              <Share2 className="mr-2 h-4 w-4" />
-              Share List
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => setShowSettingsDialog(true)}
+                size="icon"
+                className="bg-gray-700 hover:bg-gray-600 text-white h-10 w-10"
+                title="List Settings"
+              >
+                <Settings className="h-5 w-5" />
+              </Button>
+              <Button
+                onClick={() => setShowShareDialog(true)}
+                size="icon"
+                className="bg-purple-600 hover:bg-purple-700 text-white h-10 w-10"
+                title="Share List"
+              >
+                <Share2 className="h-5 w-5" />
+              </Button>
+              <Button
+                className="bg-purple-600 hover:bg-purple-700 text-white h-10 w-10"
+                onClick={() => setShowRandomPicker(true)}
+                disabled={list.items.filter((item) => !item.watched).length === 0}
+                size="icon"
+                title="Random Pick"
+              >
+                <Shuffle className="h-5 w-5" />
+              </Button>
+            </div>
           </div>
-          <div className="flex items-center justify-between">
-            <p className="text-gray-400">
-              {list.items.length} {list.items.length === 1 ? "item" : "items"} •{" "}
-              {list.items.filter((item) => item.watched).length} watched
-            </p>
-
-            <Button
-              className="bg-purple-600 hover:bg-purple-700 text-white"
-              onClick={() => setShowRandomPicker(true)}
-              disabled={list.items.filter((item) => !item.watched).length === 0}
-            >
-              <Shuffle className="mr-2 h-4 w-4" />
-              Random Pick
-            </Button>
-          </div>
+          <p className="text-gray-400">
+            {list.items.length} {list.items.length === 1 ? "item" : "items"} •{" "}
+            {list.items.filter((item) => item.watched).length} watched
+          </p>
         </motion.header>
 
         {/* Confirm Delete Dialog */}
@@ -516,36 +592,22 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
           variant="destructive"
         />
 
-        {/* Share URL Dialog */}
-        <Dialog open={!!shareUrl} onOpenChange={(open) => !open && setShareUrl(null)}>
-          <DialogContent className="bg-gray-800 border-purple-500 text-white">
-            <DialogHeader>
-              <DialogTitle className="text-purple-400">Share Your List</DialogTitle>
-            </DialogHeader>
-            <div className="py-4">
-              <p className="mb-4 text-gray-300">Share this link with friends to show them your collection:</p>
-              <div className="flex items-center gap-2 mb-4">
-                <Input value={shareUrl || ""} readOnly className="bg-gray-700 border-gray-600 text-white" />
-                <Button
-                  onClick={() => {
-                    if (shareUrl) {
-                      navigator.clipboard.writeText(shareUrl)
-                      toast.success("Link copied to clipboard")
-                    }
-                  }}
-                  className="bg-purple-600 hover:bg-purple-700 text-white"
-                >
-                  Copy
-                </Button>
-              </div>
-              <div className="flex justify-end">
-                <DialogClose asChild>
-                  <Button className="bg-gray-700 hover:bg-gray-600 text-white">Close</Button>
-                </DialogClose>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+        {/* Share Dialog */}
+        <ShareDialog
+          open={showShareDialog}
+          onOpenChange={setShowShareDialog}
+          list={list}
+          onListUpdated={(updatedList) => setList(updatedList)}
+        />
+
+        {/* List Settings Dialog */}
+        <ListSettingsDialog
+          open={showSettingsDialog}
+          onOpenChange={setShowSettingsDialog}
+          list={list}
+          onListUpdated={(updatedList) => setList(updatedList)}
+          onDeleteList={handleDeleteList}
+        />
 
         {/* Random Picker */}
         <RandomPicker
@@ -602,9 +664,13 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
               <Button
                 onClick={handleSearch}
                 className="bg-purple-600 hover:bg-purple-700 text-white"
-                disabled={isLoading}
+                disabled={isSearchLoading || !searchQuery.trim()}
               >
-                {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Search className="h-4 w-4 mr-2" />}
+                {isSearchLoading ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Search className="h-4 w-4 mr-2" />
+                )}
                 Search
               </Button>
               {isSearching && (
@@ -628,13 +694,17 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
           <AnimatePresence>
             {isSearching && (
               <motion.div
-                className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mt-4"
+                className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-4 gap-4 mt-4"
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.3 }}
               >
-                {searchResults.length > 0 ? (
+                {isSearchLoading ? (
+                  <div className="col-span-full flex items-center justify-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin text-purple-400" />
+                  </div>
+                ) : searchResults.length > 0 ? (
                   searchResults.map((item) => (
                     <motion.div
                       key={item.id}
@@ -663,7 +733,9 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
                         <h3 className="font-bold text-white mb-1">{item.title}</h3>
                         <div className="flex justify-between items-center">
                           <div>
-                            <p className="text-sm text-gray-300">{item.year}</p>
+                            <Badge variant="outline" className="text-xs text-white bg-gray-700">
+                              {item.year}
+                            </Badge>
                             <div className="flex flex-wrap gap-1 mt-1">
                               {item.genres.map((genre) => (
                                 <Badge key={genre} variant="outline" className="text-xs text-white">
@@ -686,14 +758,7 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
                   ))
                 ) : (
                   <div className="col-span-full text-center py-8 text-gray-400">
-                    {isLoading ? (
-                      <div className="flex items-center justify-center">
-                        <Loader2 className="h-6 w-6 animate-spin mr-2" />
-                        Searching...
-                      </div>
-                    ) : (
-                      "No results found. Try a different search term."
-                    )}
+                    No results found. Try a different search term.
                   </div>
                 )}
               </motion.div>
@@ -735,32 +800,31 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
                     <Badge className="ml-2 bg-gray-700 text-gray-300">{getMovies().length}</Badge>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                     <AnimatePresence>
                       {getMovies().map((item) => (
                         <motion.div
                           key={item.id}
                           className={`bg-gray-800 rounded-lg overflow-hidden hover:bg-gray-750 transition-colors pixel-border ${
-                            item.watched ? "border-l-4 border-l-purple-500" : ""
+                            item.watched ? "border-l-4 border-l-purple-500 opacity-60" : ""
                           }`}
                           initial={{ opacity: 0, scale: 0.9 }}
-                          animate={{ opacity: 1, scale: 1 }}
+                          animate={{ opacity: item.watched ? 0.7 : 1, scale: 1 }}
                           exit={{ opacity: 0, scale: 0.9 }}
                           transition={{ duration: 0.2 }}
                           layout
-                          whileHover={{ y: -5 }}
-                          onClick={() => viewItemDetails(item.id, item.type)}
+                          whileHover={{ y: -5, opacity: 1 }}
                         >
-                          <div className="relative h-[150px] cursor-pointer">
+                          <div
+                            className="relative h-[120px] cursor-pointer"
+                            onClick={() => viewItemDetails(item.id, item.type)}
+                          >
                             <Image
                               src={item.image || "/placeholder.svg?height=150&width=100"}
                               alt={item.title}
                               fill
                               className="object-cover"
                             />
-                            <div className="absolute top-2 right-2">
-                              <Badge className="bg-gray-900 text-white">Movie</Badge>
-                            </div>
                             {item.voteAverage && (
                               <div className="absolute bottom-2 left-2 bg-black/70 px-2 py-1 rounded-md text-xs">
                                 ★ {item.voteAverage.toFixed(1)}
@@ -778,9 +842,16 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
                               </div>
                             )}
 
+                            {/* Added by information */}
+                            {item.addedBy && (
+                              <div className="text-xs text-gray-400 mb-2">Added by: {getDisplayName(item.addedBy)}</div>
+                            )}
+
                             <div className="flex justify-between items-center">
                               <div>
-                                <p className="text-sm text-gray-300">{item.year}</p>
+                                <Badge variant="outline" className="text-xs text-white bg-gray-700">
+                                  {item.year}
+                                </Badge>
                                 <div className="flex flex-wrap gap-1 mt-1">
                                   {item.genres.slice(0, 2).map((genre) => (
                                     <Badge key={genre} variant="outline" className="text-xs text-white">
@@ -839,32 +910,31 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
                     <Badge className="ml-2 bg-gray-700 text-gray-300">{getSeries().length}</Badge>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                     <AnimatePresence>
                       {getSeries().map((item) => (
                         <motion.div
                           key={item.id}
                           className={`bg-gray-800 rounded-lg overflow-hidden hover:bg-gray-750 transition-colors pixel-border ${
-                            item.watched ? "border-l-4 border-l-purple-500" : ""
+                            item.watched ? "border-l-4 border-l-purple-500 opacity-60" : ""
                           }`}
                           initial={{ opacity: 0, scale: 0.9 }}
-                          animate={{ opacity: 1, scale: 1 }}
+                          animate={{ opacity: item.watched ? 0.7 : 1, scale: 1 }}
                           exit={{ opacity: 0, scale: 0.9 }}
                           transition={{ duration: 0.2 }}
                           layout
-                          whileHover={{ y: -5 }}
-                          onClick={() => viewItemDetails(item.id, item.type)}
+                          whileHover={{ y: -5, opacity: 1 }}
                         >
-                          <div className="relative h-[150px] cursor-pointer">
+                          <div
+                            className="relative h-[120px] cursor-pointer"
+                            onClick={() => viewItemDetails(item.id, item.type)}
+                          >
                             <Image
                               src={item.image || "/placeholder.svg?height=150&width=100"}
                               alt={item.title}
                               fill
                               className="object-cover"
                             />
-                            <div className="absolute top-2 right-2">
-                              <Badge className="bg-gray-900 text-white">Series</Badge>
-                            </div>
                             {item.voteAverage && (
                               <div className="absolute bottom-2 left-2 bg-black/70 px-2 py-1 rounded-md text-xs">
                                 ★ {item.voteAverage.toFixed(1)}
@@ -893,9 +963,16 @@ export default function ListDetailPage({ params }: { params: { id: string } }) {
                               </div>
                             )}
 
+                            {/* Added by information */}
+                            {item.addedBy && (
+                              <div className="text-xs text-gray-400 mb-2">Added by: {getDisplayName(item.addedBy)}</div>
+                            )}
+
                             <div className="flex justify-between items-center">
                               <div>
-                                <p className="text-sm text-gray-300">{item.year}</p>
+                                <Badge variant="outline" className="text-xs text-white bg-gray-700">
+                                  {item.year}
+                                </Badge>
                                 <div className="flex flex-wrap gap-1 mt-1">
                                   {item.genres.slice(0, 2).map((genre) => (
                                     <Badge key={genre} variant="outline" className="text-xs text-white">

@@ -9,8 +9,9 @@ type UserContextType = {
   user: User | null
   loading: boolean
   signIn: (email: string, password: string) => Promise<void>
-  signUp: (email: string, password: string) => Promise<void>
+  signUp: (email: string, password: string, displayName?: string) => Promise<void>
   signOut: () => Promise<void>
+  updateProfile: (updates: { displayName?: string; password?: string }) => Promise<void>
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined)
@@ -61,10 +62,18 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const signUp = async (email: string, password: string) => {
+  const signUp = async (email: string, password: string, displayName?: string) => {
     try {
       setLoading(true)
-      const { error } = await supabase.auth.signUp({ email, password })
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            display_name: displayName,
+          },
+        },
+      })
 
       if (error) {
         throw error
@@ -96,7 +105,40 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  return <UserContext.Provider value={{ user, loading, signIn, signUp, signOut }}>{children}</UserContext.Provider>
+  const updateProfile = async (updates: { displayName?: string; password?: string }) => {
+    try {
+      setLoading(true)
+
+      if (updates.displayName) {
+        const { error } = await supabase.auth.updateUser({
+          data: { display_name: updates.displayName },
+        })
+
+        if (error) throw error
+      }
+
+      if (updates.password) {
+        const { error } = await supabase.auth.updateUser({
+          password: updates.password,
+        })
+
+        if (error) throw error
+      }
+
+      toast.success("Profile updated successfully")
+    } catch (error: any) {
+      toast.error(error.message || "Error updating profile")
+      throw error
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <UserContext.Provider value={{ user, loading, signIn, signUp, signOut, updateProfile }}>
+      {children}
+    </UserContext.Provider>
+  )
 }
 
 export function useUser() {

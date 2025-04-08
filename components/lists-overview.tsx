@@ -1,8 +1,9 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { PlusCircle, Trash2, Edit, Share2 } from "lucide-react"
+import { PlusCircle, Trash2, Settings, Share2, Film, Tv } from "lucide-react"
 import Link from "next/link"
+import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogClose } from "@/components/ui/dialog"
@@ -116,6 +117,15 @@ export function ListsOverview() {
     return list.items.filter((item) => !item.watched).length
   }
 
+  // Get movie and series counts
+  const getMovieCount = (list: List) => {
+    return list.items.filter((item) => item.type === "movie").length
+  }
+
+  const getSeriesCount = (list: List) => {
+    return list.items.filter((item) => item.type === "series").length
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -227,17 +237,17 @@ export function ListsOverview() {
                 transition={{ duration: 0.3, delay: index * 0.1 }}
                 whileHover={{ scale: 1.02 }}
               >
-                <div className="flex justify-between items-center mb-2">
+                <div className="flex justify-between items-center mb-3">
                   <h3 className="text-xl font-bold text-purple-400">{list.name}</h3>
                   <div className="flex space-x-1">
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8 text-blue-400 hover:text-blue-300 hover:bg-blue-900/20"
+                      className="h-8 w-8 text-gray-400 hover:text-gray-300 hover:bg-gray-700/20"
                       onClick={() => startEditingList(list)}
                     >
-                      <Edit className="h-4 w-4" />
-                      <span className="sr-only">Edit</span>
+                      <Settings className="h-4 w-4" />
+                      <span className="sr-only">Settings</span>
                     </Button>
                     <Button
                       variant="ghost"
@@ -260,18 +270,81 @@ export function ListsOverview() {
                   </div>
                 </div>
 
-                <div className="text-gray-400 mb-4">
-                  <div className="flex justify-between">
-                    <span>
-                      {list.items.length} {list.items.length === 1 ? "item" : "items"}
-                    </span>
-                    <span>{getUnwatchedCount(list)} unwatched</span>
+                {/* List stats */}
+                <div className="grid grid-cols-2 gap-2 mb-4">
+                  <div className="bg-gray-750 rounded p-2 flex items-center">
+                    <div className="bg-purple-900/50 rounded-full p-1.5 mr-2">
+                      <Film className="h-4 w-4 text-purple-300" />
+                    </div>
+                    <div>
+                      <div className="text-sm text-gray-300">{getMovieCount(list)} Movies</div>
+                      <div className="text-xs text-gray-500">
+                        {list.items.filter((item) => item.type === "movie" && !item.watched).length} unwatched
+                      </div>
+                    </div>
+                  </div>
+                  <div className="bg-gray-750 rounded p-2 flex items-center">
+                    <div className="bg-purple-900/50 rounded-full p-1.5 mr-2">
+                      <Tv className="h-4 w-4 text-purple-300" />
+                    </div>
+                    <div>
+                      <div className="text-sm text-gray-300">{getSeriesCount(list)} Series</div>
+                      <div className="text-xs text-gray-500">
+                        {list.items.filter((item) => item.type === "series" && !item.watched).length} unwatched
+                      </div>
+                    </div>
                   </div>
                 </div>
 
+                {/* Item previews */}
+                {list.items.length > 0 ? (
+                  <div className="mb-4">
+                    <div className="flex space-x-1 overflow-hidden">
+                      {list.items.slice(0, 4).map((item) => (
+                        <div key={item.id} className="relative w-16 h-24 rounded overflow-hidden">
+                          <Image
+                            src={item.image || "/placeholder.svg?height=96&width=64"}
+                            alt={item.title}
+                            fill
+                            className="object-cover"
+                          />
+                          {item.watched && (
+                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                              <div className="bg-purple-600 rounded-full p-1">
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width="12"
+                                  height="12"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="3"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <polyline points="20 6 9 17 4 12"></polyline>
+                                </svg>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      {list.items.length > 4 && (
+                        <div className="relative w-16 h-24 bg-gray-750 rounded flex items-center justify-center text-gray-400">
+                          +{list.items.length - 4}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-24 bg-gray-750 rounded mb-4 flex items-center justify-center text-gray-500">
+                    No items yet
+                  </div>
+                )}
+
                 <Link
                   href={`/list/${list.id}`}
-                  className="block w-full text-center py-2 bg-gray-700 hover:bg-gray-600 rounded text-white transition-colors btn-hover-effect"
+                  className="block w-full text-center py-2 bg-purple-600 hover:bg-purple-700 rounded text-white transition-colors btn-hover-effect"
                 >
                   View List
                 </Link>

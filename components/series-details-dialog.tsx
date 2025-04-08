@@ -57,8 +57,7 @@ export function SeriesDetailsDialog({
                           </span>
                           <Button
                             size="sm"
-                            variant="outline"
-                            className="h-7 ml-2 border-purple-500 text-purple-400 hover:bg-purple-900/20"
+                            className="h-7 ml-2 bg-purple-600 hover:bg-purple-700 text-white"
                             onClick={(e) => {
                               e.stopPropagation()
                               // Check if all episodes are watched
