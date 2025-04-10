@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Loader2 } from "lucide-react"
 import { motion } from "framer-motion"
 import { format } from "date-fns"
+import { useEffect, useRef } from "react"
 
 type SeriesDetailsDialogProps = {
   open: boolean
@@ -16,6 +17,7 @@ type SeriesDetailsDialogProps = {
   loading: boolean
   onToggleEpisode: (seriesId: string, seasonId: number, episodeId: number) => void
   onToggleSeason: (seriesId: string, seasonId: number, watched: boolean) => void
+  onFetchSeriesDetails?: (seriesId: string) => void
 }
 
 export function SeriesDetailsDialog({
@@ -26,10 +28,28 @@ export function SeriesDetailsDialog({
   loading,
   onToggleEpisode,
   onToggleSeason,
+  onFetchSeriesDetails,
 }: SeriesDetailsDialogProps) {
-  if (!seriesId) return null
+  const series = seriesId ? list.items.find((item: any) => item.id === seriesId) : null
+  const hasSeasons = series && series.seasons && series.seasons.length > 0
 
-  const series = list.items.find((item: any) => item.id === seriesId)
+  const initialLoadRef = useRef(true)
+
+  useEffect(() => {
+    if (open && seriesId && initialLoadRef.current) {
+      if (!series?.seasons && onFetchSeriesDetails) {
+        onFetchSeriesDetails(seriesId)
+      }
+      initialLoadRef.current = false
+    }
+  }, [open, seriesId, series, onFetchSeriesDetails])
+
+  // Reset the initialLoadRef when the dialog closes
+  useEffect(() => {
+    if (!open) {
+      initialLoadRef.current = true
+    }
+  }, [open])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -44,7 +64,7 @@ export function SeriesDetailsDialog({
           </div>
         ) : (
           <div className="space-y-4 py-4">
-            {series?.seasons ? (
+            {hasSeasons ? (
               <Accordion type="single" collapsible className="w-full">
                 {series.seasons.map((season: any) => (
                   <AccordionItem key={season.id} value={`season-${season.id}`} className="border-gray-700">

@@ -4,12 +4,13 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import Link from "next/link"
-import { ArrowLeft, Eye, Calendar } from "lucide-react"
+import { ArrowLeft, Eye, Calendar, Clock, Tv } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { motion } from "framer-motion"
 import { format } from "date-fns"
 import { supabase } from "@/lib/supabase"
+import { getRelativeTime } from "@/lib/utils"
 
 type Episode = {
   id: number
@@ -42,6 +43,7 @@ type MediaItem = {
   seasons?: Season[]
   watchProgress?: number
   addedBy?: string
+  runtime?: number
 }
 
 type List = {
@@ -49,13 +51,13 @@ type List = {
   name: string
   items: MediaItem[]
   user_id: string
+  created_at?: string
 }
 
 export default function SharedListPage({ params }: { params: { id: string } }) {
   const [list, setList] = useState<List | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [userDisplayNames, setUserDisplayNames] = useState<Record<string, string>>({})
   const router = useRouter()
 
   // Load list from Supabase
@@ -70,7 +72,6 @@ export default function SharedListPage({ params }: { params: { id: string } }) {
 
         if (data) {
           setList(data)
-          fetchUserDisplayNames(data)
         } else {
           setError("List not found")
         }
@@ -84,45 +85,6 @@ export default function SharedListPage({ params }: { params: { id: string } }) {
 
     fetchList()
   }, [params.id])
-
-  // Fetch user display names for items
-  const fetchUserDisplayNames = async (listData: List) => {
-    // Collect all user IDs that need display names
-    const userIds = new Set<string>()
-
-    // Add list owner
-    userIds.add(listData.user_id)
-
-    // Add users who added items
-    listData.items.forEach((item) => {
-      if (item.addedBy) userIds.add(item.addedBy)
-    })
-
-    if (userIds.size === 0) return
-
-    try {
-      const { data, error } = await supabase
-        .from("users")
-        .select("id, email, display_name")
-        .in("id", Array.from(userIds))
-
-      if (error) throw error
-
-      const displayNames: Record<string, string> = {}
-      data?.forEach((user) => {
-        displayNames[user.id] = user.display_name || user.email || "Unknown user"
-      })
-
-      setUserDisplayNames(displayNames)
-    } catch (error) {
-      console.error("Error fetching user display names:", error)
-    }
-  }
-
-  // Get display name for a user
-  const getDisplayName = (userId: string) => {
-    return userDisplayNames[userId] || "Unknown user"
-  }
 
   if (loading) {
     return (
@@ -167,6 +129,7 @@ export default function SharedListPage({ params }: { params: { id: string } }) {
           </Link>
         </motion.div>
 
+        {/* Update the header section */}
         <motion.header
           className="mb-8"
           initial={{ opacity: 0, y: -20 }}
@@ -175,13 +138,13 @@ export default function SharedListPage({ params }: { params: { id: string } }) {
         >
           <div className="inline-block bg-purple-600 text-white px-3 py-1 rounded-lg mb-2">Shared List</div>
           <h1 className="text-3xl font-bold mb-2 text-purple-400 pixel-font">{list.name}</h1>
-          <p className="text-gray-400">
-            {list.items.length} {list.items.length === 1 ? "item" : "items"} •{" "}
-            {list.items.filter((item) => item.watched).length} watched
-          </p>
-          {list.user_id && userDisplayNames[list.user_id] && (
-            <p className="text-gray-400">Created by: {userDisplayNames[list.user_id]}</p>
-          )}
+          <div className="space-y-1">
+            <p className="text-gray-400">
+              {list.items.length} {list.items.length === 1 ? "item" : "items"} •{" "}
+              {list.items.filter((item) => item.watched).length} watched
+            </p>
+            {list.created_at && <p className="text-sm text-gray-400">Created {getRelativeTime(list.created_at)}</p>}
+          </div>
         </motion.header>
 
         {/* List Items */}
@@ -224,6 +187,7 @@ export default function SharedListPage({ params }: { params: { id: string } }) {
                       </div>
                     )}
                   </div>
+                  {/* Update the item card content to match the list detail page format */}
                   <div className="p-3">
                     <h3 className="font-bold text-white mb-1">{item.title}</h3>
 
@@ -246,22 +210,24 @@ export default function SharedListPage({ params }: { params: { id: string } }) {
                       </div>
                     )}
 
-                    {/* Added by information */}
-                    {item.addedBy && (
-                      <div className="text-xs text-gray-400 mb-2">Added by: {getDisplayName(item.addedBy)}</div>
-                    )}
-
-                    <div>
-                      <Badge variant="outline" className="text-xs text-white bg-gray-700">
+                    {/* Year and runtime/seasons in a single row */}
+                    <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
+                      <div className="flex items-center">
+                        <Calendar className="h-3 w-3 mr-1" />
                         {item.year}
-                      </Badge>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {item.genres.slice(0, 2).map((genre) => (
-                          <Badge key={genre} variant="outline" className="text-xs">
-                            {genre}
-                          </Badge>
-                        ))}
                       </div>
+                      {item.type === "movie" && item.runtime && (
+                        <div className="flex items-center">
+                          <Clock className="h-3 w-3 mr-1" />
+                          {item.runtime} min
+                        </div>
+                      )}
+                      {item.type === "series" && item.seasons && (
+                        <div className="flex items-center">
+                          <Tv className="h-3 w-3 mr-1" />
+                          {item.seasons} {item.seasons === 1 ? "Season" : "Seasons"}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </motion.div>

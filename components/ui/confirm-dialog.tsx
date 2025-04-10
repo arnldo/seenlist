@@ -43,7 +43,7 @@ export function ConfirmDialog({
         </DialogHeader>
         {children}
         <DialogFooter className="flex gap-2 sm:justify-end">
-          <Button className="bg-gray-700 hover:bg-gray-600 text-white" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" className="border-gray-600 text-gray-300" onClick={() => onOpenChange(false)}>
             {cancelText}
           </Button>
           <Button

@@ -10,8 +10,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { motion, AnimatePresence } from "framer-motion"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { useUser } from "@/contexts/user-context"
+import { getRelativeTime } from "@/lib/utils"
 import { getLists, createList, deleteList, updateList, type List } from "@/lib/db-service"
 import toast from "react-hot-toast"
+import { useRouter } from "next/navigation"
+import { Badge } from "@/components/ui/badge"
 
 export function ListsOverview() {
   const [lists, setLists] = useState<List[]>([])
@@ -21,6 +24,7 @@ export function ListsOverview() {
   const [listToDelete, setListToDelete] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const { user } = useUser()
+  const router = useRouter()
 
   // Load lists from Supabase
   useEffect(() => {
@@ -35,6 +39,7 @@ export function ListsOverview() {
     try {
       setLoading(true)
       const data = await getLists(user.id)
+      console.log(data)
       setLists(data)
     } catch (error) {
       console.error("Error fetching lists:", error)
@@ -44,6 +49,7 @@ export function ListsOverview() {
     }
   }
 
+  // Update the createNewList function to redirect to the new list page
   const createNewList = async () => {
     if (newListName.trim() === "" || !user) return
 
@@ -52,6 +58,9 @@ export function ListsOverview() {
       setLists([...lists, newList])
       setNewListName("")
       toast.success(`"${newListName}" has been created.`)
+
+      // Redirect to the new list page
+      router.push(`/list/${newList.id}`)
     } catch (error) {
       console.error("Error creating list:", error)
       toast.error("Failed to create list")
@@ -166,7 +175,7 @@ export function ListsOverview() {
               </div>
               <div className="flex justify-end gap-2">
                 <DialogClose asChild>
-                  <Button className="bg-gray-700 hover:bg-gray-600 text-white">
+                  <Button variant="outline" className="border-gray-600 text-gray-300">
                     Cancel
                   </Button>
                 </DialogClose>
@@ -228,9 +237,14 @@ export function ListsOverview() {
         <AnimatePresence>
           {lists.length > 0 ? (
             lists.map((list, index) => (
+              // Find the list card rendering section and add the created_at display:
               <motion.div
                 key={list.id}
-                className="bg-gray-800 rounded-lg p-4 border-2 border-gray-700 hover:border-purple-500 transition-colors pixel-border"
+                className={`bg-gray-800 rounded-lg p-4 border-2 ${
+                  list.isOwner
+                    ? "border-gray-700 hover:border-purple-500"
+                    : "border-purple-500/30 hover:border-purple-500"
+                } transition-colors pixel-border`}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.9 }}
@@ -238,7 +252,17 @@ export function ListsOverview() {
                 whileHover={{ scale: 1.02 }}
               >
                 <div className="flex justify-between items-center mb-3">
-                  <h3 className="text-xl font-bold text-purple-400">{list.name}</h3>
+                  <div>
+                    <div className="flex items-center">
+                      <h3 className="text-xl font-bold text-purple-400">{list.name}</h3>
+                      {!list.isOwner && (
+                        <Badge className="ml-2 bg-purple-600/50 text-white text-xs">Shared with you</Badge>
+                      )}
+                    </div>
+                    {list.created_at && (
+                      <p className="text-xs text-gray-400">Created {getRelativeTime(list.created_at)}</p>
+                    )}
+                  </div>
                   <div className="flex space-x-1">
                     <Button
                       variant="ghost"

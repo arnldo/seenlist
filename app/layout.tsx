@@ -4,6 +4,7 @@ import { Inter } from "next/font/google"
 import "./globals.css"
 import { UserProvider } from "@/contexts/user-context"
 import { Toaster } from "react-hot-toast"
+import { InvitationDialogProvider } from "@/components/invitation-dialog-provider"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -22,6 +23,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <UserProvider>
+          <InvitationDialogProvider />
           {children}
           <Toaster
             position="bottom-right"

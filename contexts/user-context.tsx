@@ -26,14 +26,24 @@ export function UserProvider({ children }: { children: ReactNode }) {
       const {
         data: { session },
       } = await supabase.auth.getSession()
-      setUser(session?.user || null)
+
+      if (session?.user) {
+        setUser(session.user)
+      } else {
+        setUser(null)
+      }
+
       setLoading(false)
 
       // Listen for auth changes
       const {
         data: { subscription },
-      } = await supabase.auth.onAuthStateChange((_event, session) => {
-        setUser(session?.user || null)
+      } = await supabase.auth.onAuthStateChange(async (_event, session) => {
+        if (session?.user) {
+          setUser(session.user)
+        } else {
+          setUser(null)
+        }
       })
 
       return () => {
@@ -65,7 +75,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const signUp = async (email: string, password: string, displayName?: string) => {
     try {
       setLoading(true)
-      const { error } = await supabase.auth.signUp({
+      const { error, data } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -109,12 +119,13 @@ export function UserProvider({ children }: { children: ReactNode }) {
     try {
       setLoading(true)
 
-      if (updates.displayName) {
-        const { error } = await supabase.auth.updateUser({
+      if (updates.displayName && user) {
+        // Update auth metadata
+        const { error: authError } = await supabase.auth.updateUser({
           data: { display_name: updates.displayName },
         })
 
-        if (error) throw error
+        if (authError) throw authError
       }
 
       if (updates.password) {

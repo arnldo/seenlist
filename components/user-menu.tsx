@@ -1,7 +1,6 @@
 "use client"
 
-import { useUser } from "@/contexts/user-context"
-import { Button } from "@/components/ui/button"
+import { useRouter } from "next/navigation"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,43 +8,98 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuGroup,
 } from "@/components/ui/dropdown-menu"
-import { LogOut, Settings, User } from "lucide-react"
-import Link from "next/link"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
+import { LogOut, UserIcon } from "lucide-react"
+import { useUser } from "@/contexts/user-context"
+import toast from "react-hot-toast"
+import { getGravatarUrl } from "@/lib/utils"
+import { useInvitationToasts } from "./invitation-toast"
 
 export function UserMenu() {
   const { user, signOut } = useUser()
+  const router = useRouter()
+  const { pendingCount } = useInvitationToasts()
 
-  if (!user) return null
+  const handleSignOut = async () => {
+    try {
+      await signOut()
+      router.push("/login")
+    } catch (error) {
+      console.error("Error signing out:", error)
+      toast.error("Failed to sign out")
+    }
+  }
 
-  // Get display name or email
-  const displayName = user.user_metadata?.display_name || user.email
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+  }
+
+  // Get display name or username from email
+  const getDisplayName = () => {
+    if (user?.user_metadata?.display_name) return user.user_metadata.display_name
+    if (user?.email) {
+      // Extract username from email
+      const username = user.email.split("@")[0]
+      return username.charAt(0).toUpperCase() + username.slice(1)
+    }
+    return "User"
+  }
+
+  if (!user) {
+    return (
+      <Button onClick={() => router.push("/login")} className="bg-purple-600 hover:bg-purple-700 text-white">
+        Sign In
+      </Button>
+    )
+  }
+
+  // Get Gravatar URL
+  const avatarUrl = user.email ? getGravatarUrl(user.email) : null
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-800">
-          <User className="h-4 w-4 text-purple-400" />
-          <span className="font-medium text-white">{displayName}</span>
+        <Button variant="ghost" className="relative h-10 w-10 rounded-full">
+          <Avatar>
+            <AvatarImage src={avatarUrl || ""} alt={getDisplayName()} />
+            <AvatarFallback className="bg-purple-600 text-white">{getInitials(getDisplayName())}</AvatarFallback>
+          </Avatar>
+          {pendingCount > 0 && (
+            <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] text-white">
+              {pendingCount}
+            </span>
+          )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-56 bg-gray-800 border-gray-700 text-white" align="end">
-        <DropdownMenuLabel className="text-gray-400">My Account</DropdownMenuLabel>
+      <DropdownMenuContent align="end" className="w-56 bg-gray-800 border-gray-700 text-white">
+        <DropdownMenuLabel>
+          <div className="flex flex-col space-y-1">
+            <p className="text-sm font-medium leading-none">{getDisplayName()}</p>
+            <p className="text-xs leading-none text-gray-400">{user.email}</p>
+          </div>
+        </DropdownMenuLabel>
         <DropdownMenuSeparator className="bg-gray-700" />
-        <DropdownMenuItem className="text-white hover:bg-gray-700 cursor-pointer">
-          <User className="mr-2 h-4 w-4" />
-          <span>{user.email}</span>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator className="bg-gray-700" />
-        <Link href="/profile">
-          <DropdownMenuItem className="text-white hover:bg-gray-700 cursor-pointer">
-            <Settings className="mr-2 h-4 w-4" />
-            <span>Profile Settings</span>
+
+        <DropdownMenuGroup>
+          <DropdownMenuItem
+            className="text-white hover:bg-gray-700 cursor-pointer"
+            onClick={() => router.push("/profile")}
+          >
+            <UserIcon className="mr-2 h-4 w-4 text-purple-400" />
+            <span>Profile</span>
           </DropdownMenuItem>
-        </Link>
-        <DropdownMenuItem className="text-white hover:bg-gray-700 cursor-pointer" onClick={() => signOut()}>
-          <LogOut className="mr-2 h-4 w-4" />
-          <span>Sign out</span>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator className="bg-gray-700" />
+        <DropdownMenuItem className="text-white hover:bg-gray-700 cursor-pointer" onClick={handleSignOut}>
+          <LogOut className="mr-2 h-4 w-4 text-purple-400" />
+          <span>Log out</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

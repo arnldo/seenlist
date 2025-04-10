@@ -63,7 +63,8 @@
     "@supabase/supabase-js": "latest",
     "react-hot-toast": "latest",
     "framer-motion": "latest",
-    "canvas-confetti": "latest"
+    "canvas-confetti": "latest",
+    "crypto-js": "latest"
   },
   "devDependencies": {
     "@types/node": "^22",

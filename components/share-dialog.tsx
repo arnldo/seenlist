@@ -13,10 +13,10 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Loader2, Trash2, UserPlus, User, Copy, LinkIcon, Users } from "lucide-react"
+import { Loader2, Trash2, UserPlus, User, Copy, LinkIcon, Users, Clock, CheckCircle, XCircle } from "lucide-react"
 import toast from "react-hot-toast"
-import { addCollaborator, removeCollaborator, type List } from "@/lib/db-service"
-import { supabase } from "@/lib/supabase"
+import { type List, inviteUserToList, removeCollaborator } from "@/lib/db-service"
+import { useUser } from "@/contexts/user-context"
 
 type ShareDialogProps = {
   open: boolean
@@ -25,104 +25,61 @@ type ShareDialogProps = {
   onListUpdated: (updatedList: List) => void
 }
 
-type CollaboratorUser = {
-  id: string
-  email: string
-  display_name?: string
-}
-
 export function ShareDialog({ open, onOpenChange, list, onListUpdated }: ShareDialogProps) {
+  const { user } = useUser()
   const [activeSection, setActiveSection] = useState<"share" | "collaborators">("share")
   const [shareUrl, setShareUrl] = useState<string>("")
   const [email, setEmail] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [collaborators, setCollaborators] = useState<CollaboratorUser[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Check if the current user is the owner of the list
+  const isOwner = list.isOwner === true
 
   // Generate share URL when dialog opens
   useEffect(() => {
     if (open) {
       const url = `${window.location.origin}/shared-list/${list.id}`
       setShareUrl(url)
-
-      // Also fetch collaborators if any
-      if (list.collaborators?.length) {
-        fetchCollaborators()
-      } else {
-        setCollaborators([])
-      }
     }
-  }, [open, list.id, list.collaborators])
-
-  const fetchCollaborators = async () => {
-    if (!list.collaborators?.length) {
-      setCollaborators([])
-      return
-    }
-
-    setLoading(true)
-    try {
-      // Try to fetch user profiles from auth.users
-      const { data: authUsers, error: authError } = await supabase
-        .from("profiles")
-        .select("id, email, display_name")
-        .in("id", list.collaborators)
-
-      if (authError) {
-        console.error("Error fetching collaborators:", authError)
-        // Fallback to placeholder data
-        const placeholderCollaborators: CollaboratorUser[] = list.collaborators.map((id, index) => ({
-          id,
-          email: `collaborator${index + 1}@example.com`,
-          display_name: `Collaborator ${index + 1}`,
-        }))
-        setCollaborators(placeholderCollaborators)
-      } else {
-        setCollaborators(authUsers || [])
-      }
-    } catch (error) {
-      console.error("Error fetching collaborators:", error)
-      toast.error("Failed to load collaborators")
-    } finally {
-      setLoading(false)
-    }
-  }
+  }, [open, list.id])
 
   const handleAddCollaborator = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!email.trim()) return
+    if (!email.trim() || !user || !isOwner) return
 
     setIsSubmitting(true)
     setError(null)
 
     try {
-      const updatedList = await addCollaborator(list.id, email)
+      // Get the display name of the current user
+      const displayName = user.user_metadata?.display_name || user.email || "Unknown user"
+
+      // Invite the user
+      const updatedList = await inviteUserToList(list.id, user.id, displayName, email)
+
       onListUpdated(updatedList)
       setEmail("")
-      toast.success("Collaborator added!")
-      fetchCollaborators()
+      toast.success("Invitation sent!")
     } catch (error: any) {
       console.error("Error adding collaborator:", error)
       setError(error.message || "Failed to add collaborator")
-      toast.error(error.message || "Failed to add collaborator")
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  const handleRemoveCollaborator = async (collaboratorId: string) => {
-    setLoading(true)
+  const handleRemoveCollaborator = async (collaboratorEmail: string) => {
+    if (!isOwner) return
+
     try {
-      const updatedList = await removeCollaborator(list.id, collaboratorId)
+      const updatedList = await removeCollaborator(list.id, collaboratorEmail)
+
       onListUpdated(updatedList)
       toast.success("Collaborator removed!")
-      fetchCollaborators()
     } catch (error: any) {
       console.error("Error removing collaborator:", error)
       toast.error(error.message || "Failed to remove collaborator")
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -132,17 +89,43 @@ export function ShareDialog({ open, onOpenChange, list, onListUpdated }: ShareDi
     })
   }
 
+  // Function to get status badge
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "pending":
+        return (
+          <div className="flex items-center text-yellow-400">
+            <Clock className="h-3 w-3 mr-1" /> Pending
+          </div>
+        )
+      case "accepted":
+        return (
+          <div className="flex items-center text-green-400">
+            <CheckCircle className="h-3 w-3 mr-1" /> Accepted
+          </div>
+        )
+      case "rejected":
+        return (
+          <div className="flex items-center text-red-400">
+            <XCircle className="h-3 w-3 mr-1" /> Rejected
+          </div>
+        )
+      default:
+        return null
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="bg-gray-800 border-purple-500 text-white max-w-3xl">
         <DialogHeader>
           <DialogTitle className="text-purple-400">Share "{list.name}"</DialogTitle>
           <DialogDescription className="text-gray-400">
-            Share your list with others or invite collaborators
+            Share your list with others{isOwner ? " or invite collaborators" : ""}
           </DialogDescription>
         </DialogHeader>
 
-        {/* Improved navigation */}
+        {/* Navigation - only show collaborators tab to the owner */}
         <div className="flex border-b border-gray-700 mb-6">
           <button
             className={`flex items-center px-4 py-3 ${
@@ -155,17 +138,20 @@ export function ShareDialog({ open, onOpenChange, list, onListUpdated }: ShareDi
             <LinkIcon className="h-4 w-4 mr-2" />
             Share Link
           </button>
-          <button
-            className={`flex items-center px-4 py-3 ${
-              activeSection === "collaborators"
-                ? "text-purple-400 border-b-2 border-purple-400 font-medium"
-                : "text-gray-400 hover:text-gray-300"
-            }`}
-            onClick={() => setActiveSection("collaborators")}
-          >
-            <Users className="h-4 w-4 mr-2" />
-            Collaborators
-          </button>
+
+          {isOwner && (
+            <button
+              className={`flex items-center px-4 py-3 ${
+                activeSection === "collaborators"
+                  ? "text-purple-400 border-b-2 border-purple-400 font-medium"
+                  : "text-gray-400 hover:text-gray-300"
+              }`}
+              onClick={() => setActiveSection("collaborators")}
+            >
+              <Users className="h-4 w-4 mr-2" />
+              Collaborators
+            </button>
+          )}
         </div>
 
         {activeSection === "share" && (
@@ -184,11 +170,11 @@ export function ShareDialog({ open, onOpenChange, list, onListUpdated }: ShareDi
           </div>
         )}
 
-        {activeSection === "collaborators" && (
+        {activeSection === "collaborators" && isOwner && (
           <div className="space-y-4">
             <form onSubmit={handleAddCollaborator} className="flex items-center gap-2">
               <Input
-                placeholder="Enter email address"
+                placeholder="Enter email address to invite"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="bg-gray-700 border-gray-600 text-white flex-1"
@@ -203,7 +189,7 @@ export function ShareDialog({ open, onOpenChange, list, onListUpdated }: ShareDi
                 ) : (
                   <>
                     <UserPlus className="h-4 w-4 mr-2" />
-                    Add
+                    Invite
                   </>
                 )}
               </Button>
@@ -214,27 +200,37 @@ export function ShareDialog({ open, onOpenChange, list, onListUpdated }: ShareDi
             )}
 
             <div className="space-y-2">
-              <h3 className="text-sm font-medium text-gray-400 mb-2">Current Collaborators</h3>
+              <h3 className="text-sm font-medium text-gray-400 mb-2">Collaborators & Invitations</h3>
 
-              {loading ? (
-                <div className="flex justify-center py-4">
-                  <Loader2 className="h-6 w-6 animate-spin text-purple-400" />
-                </div>
-              ) : collaborators.length > 0 ? (
+              {list.collaborators && list.collaborators.length > 0 ? (
                 <div className="space-y-2">
-                  {collaborators.map((collaborator) => (
-                    <div key={collaborator.id} className="flex items-center justify-between bg-gray-700 p-2 rounded-md">
+                  {list.collaborators.map((collaborator) => (
+                    <div
+                      key={typeof collaborator === "string" ? collaborator : collaborator.email}
+                      className="flex items-center justify-between bg-gray-700 p-2 rounded-md"
+                    >
                       <div className="flex items-center">
                         <User className="h-4 w-4 mr-2 text-purple-400" />
                         <div>
-                          <p className="text-sm font-medium">{collaborator.display_name || "User"}</p>
-                          <p className="text-xs text-gray-400">{collaborator.email}</p>
+                          <p className="text-sm font-medium">
+                            {typeof collaborator === "string" ? collaborator : collaborator.email}
+                          </p>
+                          {typeof collaborator !== "string" && getStatusBadge(collaborator.status)}
+                          {typeof collaborator !== "string" &&
+                            collaborator.status === "pending" &&
+                            collaborator.invitedAt && (
+                              <p className="text-xs text-gray-400">
+                                Invited {new Date(collaborator.invitedAt).toLocaleDateString()}
+                              </p>
+                            )}
                         </div>
                       </div>
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleRemoveCollaborator(collaborator.id)}
+                        onClick={() =>
+                          handleRemoveCollaborator(typeof collaborator === "string" ? collaborator : collaborator.email)
+                        }
                         className="text-red-400 hover:text-red-300 hover:bg-red-900/20 h-8 w-8 p-0"
                       >
                         <Trash2 className="h-4 w-4" />
