@@ -149,7 +149,6 @@ export async function createList(userId: string, name: string, description = "")
       .insert([
         {
           name,
-          description,
           user_id: userId,
           items: [],
           collaborators: [],
