@@ -34,7 +34,7 @@ export function ShareDialog({ open, onOpenChange, list, onListUpdated }: ShareDi
   const [error, setError] = useState<string | null>(null)
 
   // Check if the current user is the owner of the list
-  const isOwner = list.isOwner === true
+  const isOwner = list.user_id === user?.id
 
   // Generate share URL when dialog opens
   useEffect(() => {
